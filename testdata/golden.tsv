@@ -1,0 +1,98 @@
+# 排序回归评测集 — 每行钉住一个「有人为此做过决定」的排序结果。
+#
+# 格式：输入<TAB>期望词[<TAB>has]，# 起注释。没有 has 的行断言首选
+#（空格上屏的那一格）；带 has 的行断言「面板拿到的 60 条里有它」。
+#
+# 跑法：
+#   go run ./apps/q-ime/tools/qime-audit -mode golden          # 手工
+#   go test ./apps/q-ime -run TestGolden                       # 有词库的机器上自动跑
+#
+# 追加为主。一个案例抓到过一次回归，就永久留在这里；删行需要和删测试
+# 同等的理由。所有期望都是无用户词典、出厂默认（纠错开、模糊音关、
+# 英文表开）下量出来的。
+
+# ---- 整音节 / 常用词：引擎最基本的答案 ----
+nihao	你好
+women	我们
+zhongguo	中国
+beijing	北京
+shenzhen	深圳
+xiexie	谢谢
+zenmeban	怎么办
+weishenme	为什么
+pinyin	拼音
+shurufa	输入法
+keyi	可以
+renmin	人民
+wo	我
+ni	你
+bu	不
+de	的
+le	了
+ma	吗
+hao	好
+dou	都
+men	们
+
+# ---- 简拼 / 混拼：coverBonus 和各罚分的平衡 ----
+zhg	中国	# 两个纯声母；这 更常用但只解释了 zh
+beij	北京	# 末音节缩写成声母
+b	把	# 单声母的最常用解
+womenmingtianqubeijing	我们明天去北京	# 整句 Viterbi
+jintianwanshangchishenme	今天晚上吃什么
+zhonghuarenmingongheguo	中华人民共和国	# 长词条走单词路径，不吃 junction 罚分
+chifanle	吃饭了
+
+# ---- partialPenalty：打完的音节不许被延长 ----
+shan	山	# 上 常用十倍，但 shang 不是用户打的
+shang	上
+xian	先	# 不带分隔符时单音节读法优先
+xi'an	西安	# 分隔符强制 xi+an
+
+# ---- syllablePenalty：更简单的切分优先 ----
+ban	半	# 备案 更常用但要两个音节
+ban	版权	has	# 权重被「版权所有」样板文字抬高的预测：封顶在 半 之下，但仍然给出
+
+# ---- coverBonus 6.5：解释掉每一个字母的读法必须赢 ----
+lihail	厉害了	# 5.0 时代的真凶：厉害 曾把 l 扔着不解释
+meiguor	美国人
+womend	我们的	has	# 首选是 我们党（词库权重使然，不钉）；我们的 必须在面板上
+
+# ---- 词库权重的忠实反映（README 记录过、明确接受的行为）----
+nih	你会	# 语料里 你会 > 你还 > 你好；用户选一次 你好 就置顶（学习路径另有测试）
+nih	你好	has
+niha	你还
+bowuguan	博物馆
+tiananmen	天安门
+hen	很
+song	送
+shi	是
+zhe	这
+
+# ---- 纠错：相邻对调 / 漏键 / 键重复，一次一滑 ----
+pign	平	# 音节内对调
+hoa	好
+zhonguo	中国	# 第二个 g 漏了：zhon 修复成 zhong
+zhogguo	中国	# n 漏了
+zhongguuo	中国	# u 连按重复：guuo 修复成 guo
+pinng	平	# n 连按重复
+diu	丢	# 打对的真音节永远不被重读——对 不许出现在首位
+
+# ---- 英文：完全命中 + 截断保底 ----
+hello	hello	# 没有干净的中文读法时英文赢
+ssh	SSH	has	# truncateKeepingEnglish：截到 60 条也不许把英文截掉
+js	JS	has
+cd	CD	has
+my	my	has
+zsh	Zsh	has
+git	git	has
+
+# ---- tencent_lite 精炼子集：整词战胜逐字拼句 ----
+# 这几条只有在 dictc 带上 -lite（tencent_lite.dict.yaml）时才成立：整词条目
+# 被提到 ext 的档位后，才压得住同读音下按字拼出来的句子。没带 lite 就会退回
+# 注释里那个「拼句」结果——失败即说明词库少编了一个源。
+madajiasijiadeqie	马达加斯加的企鹅	# 否则 马达加斯加+的+且
+kuajiegewangdisanji	跨界歌王第三季	# 否则 跨界歌王+地+三级
+tubatuzhuangxiu	土巴兔装修	# 否则 图八+突+装修
+zhongguoguojiazuqiudui	中国国家足球队	# 提权前靠拼句侥幸命中，提权后是一个词条
+leimanxiongdipochan	雷曼兄弟破产	# 否则 雷曼兄弟+破产
