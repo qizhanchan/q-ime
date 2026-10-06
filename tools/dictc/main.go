@@ -1,6 +1,6 @@
 // Command dictc compiles rime-ice dictionaries into q-ime's binary lexicon.
 //
-//	go run ./apps/q-ime/tools/dictc -src /opt/test/rime-ice -out apps/q-ime/Resources/lexicon.bin
+//	go run ./tools/dictc -out build/lexicon.bin
 //
 // Runs offline, once, at build time. Nothing here ships in the input method:
 // the app only ever mmaps the output.
@@ -19,8 +19,9 @@
 // which is what Rime itself does at build time. See annotate.
 //
 // One source lives outside the checkout: -lite points at
-// tencent_lite.dict.yaml, a refined subset of the tencent list. See
-// tencentLite for why it is a re-ranking rather than added coverage.
+// third_party/tencent_lite.dict.yaml, a refined subset of the tencent list
+// committed to this repository. See tencentLite for why it is a re-ranking
+// rather than added coverage.
 //
 // # Why the sources are weighted against each other
 //
@@ -95,7 +96,7 @@ var sources = []source{
 	{file: "cn_dicts/tencent.dict.yaml", trust: 0.42, annotate: true},
 }
 
-// tencentLite is the second, optional half of the tencent story.
+// tencentLite is the second half of the tencent story.
 //
 // tencent.dict.yaml is ~980k entries at a uniform weight of 100, so it carries
 // no order of its own and lands wholesale on flatSourceLevel. That is the
@@ -103,11 +104,10 @@ var sources = []source{
 // a sixth of it is real lexical items and the rest is sentence fragments
 // harvested from web text, and nothing in the file says which is which.
 //
-// tencent_lite.dict.yaml is exactly that verdict: ~168k entries, a
-// semantically-refined subset of the same list. Measured against the bulk
-// file, 167269 of its 168093 entries are already in it — this is NOT a
-// coverage drop-in (it contributes ~700 genuinely new words), it is a QUALITY
-// LABEL on a sixth of a source we already ship.
+// third_party/tencent_lite.dict.yaml is exactly that verdict: ~167k entries, a
+// semantically-refined subset of the same list. Against the bulk file it is NOT
+// a coverage drop-in (it contributes few genuinely new words), it is a
+// QUALITY LABEL on a sixth of a source we already ship.
 //
 // So it is merged as its own source at a higher flat level, fed after the bulk
 // file so Builder.Add's keep-the-higher-weight rule promotes the overlap.
@@ -131,8 +131,8 @@ var tencentLite = source{
 
 func main() {
 	var (
-		src     = flag.String("src", "/opt/test/rime-ice", "rime-ice checkout")
-		lite    = flag.String("lite", "", "tencent_lite.dict.yaml (optional, outside -src)")
+		src     = flag.String("src", "third_party/rime-ice", "rime-ice checkout")
+		lite    = flag.String("lite", "third_party/tencent_lite.dict.yaml", "tencent_lite.dict.yaml (optional, outside -src)")
 		out     = flag.String("out", "lexicon.bin", "output file")
 		maxPost = flag.Int("max-per-key", 96, "cap candidates kept per reading")
 		verbose = flag.Bool("v", false, "log per-source detail")
@@ -141,8 +141,15 @@ func main() {
 
 	srcs := sources
 	if *lite != "" {
+		// The lite file lives outside -src, so resolve it against the working
+		// directory now: readSource joins a relative path with -src, which
+		// would look for it inside the rime-ice checkout.
+		abs, err := filepath.Abs(*lite)
+		if err != nil {
+			log.Fatalf("dictc: -lite %q: %v", *lite, err)
+		}
 		s := tencentLite
-		s.file = *lite
+		s.file = abs
 		srcs = append(append([]source{}, srcs...), s)
 	}
 
@@ -458,10 +465,8 @@ const flatSourceLevel = 0.002
 // LINEAR scaling, which is a constant offset in the log domain the engine
 // scores in — so a source's own frequency distribution survives intact. That
 // distribution is the most valuable thing these files contain: 我们 outweighs
-// 我么 by 36×, and it is exactly that ratio which decides the two candidates.
-// An earlier version normalized by RANK, which threw the ratios away and
-// flattened the pair to near-equal — the visible symptom being 我么 offered
-// ahead of 我们.
+// 我么 by a large ratio, and it is exactly that ratio which decides the two
+// candidates. Rank-based normalization would throw the ratios away.
 //
 // The scale factor is set from a high percentile rather than the maximum, so
 // one outlier entry cannot compress the rest of the source into the floor.

@@ -336,9 +336,7 @@ func (s *imeSession) handleText(client unsafe.Pointer, text string, keyCode int,
 	//
 	// Guarded on englishMode so that the branch above OWNS the letters while an
 	// English word is in progress. Without the guard both branches append the
-	// same byte and the English one is dead code — which is how mutation
-	// testing found it: deleting it changed no behaviour and failed no test,
-	// while leaving the file claiming a distinction it did not make.
+	// same byte and the English one is dead code.
 	//
 	// A capital also must not switch language. The Shift-tap gesture is a
 	// press and a release with NOTHING in between, and this key is the
@@ -405,7 +403,7 @@ func (s *imeSession) handleText(client unsafe.Pointer, text string, keyCode int,
 		}
 	}
 
-	// Anything else — capitals, digits outside a composition, the symbols the
+	// Anything else — digits outside a composition, the symbols the
 	// punctuation table leaves alone — goes through as literal text.
 	return s.passLiteral(client, text)
 }
@@ -508,20 +506,17 @@ func (s *imeSession) setMarked(client unsafe.Pointer, text string) {
 // or because the composition was in the way of something else.
 //
 // Only a pick is evidence of preference, and only evidence of preference belongs
-// in the user dictionary. Before this distinction existed, every path that put
-// text on screen wrote to it at full weight, and the two most common ones are
-// not choices at all: Space commits whatever is HIGHLIGHTED, which is candidate
-// #1 unless the user moved the selection, and commitAll flushes every piece of
-// the buffer when a capital letter, a punctuation mark or a focus change
-// interrupts a composition.
+// in the user dictionary. Without this distinction, every path that put text on
+// screen would write at full weight, and two of the most common are not choices
+// at all: Space commits whatever is HIGHLIGHTED — candidate #1 unless the user
+// moved the selection — and commitAll flushes every piece of the buffer when a
+// capital letter, a punctuation mark or a focus change interrupts a
+// composition.
 //
-// That made the ranking self-reinforcing. Measured on the real profile that
-// reported it: 关 is the top candidate for `guan`, so committing after 博物 and
-// carrying on recorded 博物→关 — which made 关 more firmly the top candidate. Two
-// such commits were enough to bury 馆, and undoing them takes five deliberate
-// picks, because userScale·ln(count+1) is flat and 关 leads on lexicon frequency
-// by 1.96 besides. A wrong default that trains itself is much harder to leave
-// than one that just sits there.
+// That would make the ranking self-reinforcing: the top candidate for a reading
+// gets committed by habit, which boosts it, which makes it more firmly the top
+// candidate. A wrong default that trains itself is much harder to leave than
+// one that just sits there.
 type commitKind int
 
 const (
@@ -686,24 +681,21 @@ func (s *imeSession) handleSpecialKey(client unsafe.Pointer, keyCode int, mods u
 		// list is offering. `nihao` + Enter is "nihao", not 你好.
 		//
 		// The keys that confirm Chinese are Space and the digits, and nothing
-		// else — that split is the whole point. Enter used to confirm the
-		// highlighted candidate whenever one covered the buffer, which made it a
-		// second Space with a dead end behind it: a run of letters that is not
-		// Chinese at all usually has SOME reading covering every one of them, so
-		// Enter confirmed that instead. `bigquery` reads as bi'g'qu'er'y and
-		// offers 比过去而言 at full coverage — leaving no way to put the word
-		// itself in the document, let alone teach it.
+		// else — that split is the whole point. If Enter also confirmed a
+		// candidate covering the buffer it would become a second Space with a
+		// dead end behind it: a run of letters that is not Chinese at all
+		// usually has SOME reading covering every one of them, so there would
+		// be no way to put the word itself in the document, let alone teach it.
 		//
 		// A separate key rather than a smarter rule, because the input cannot
 		// tell you which was meant. Force-fitting is not the signal: `zhg` →
 		// 中国 also spends two bare initials, and it is exactly right. Neither is
 		// being a stitched sentence: `womenqu` → 我们去 is stitched and also
-		// right. The only thing that knows is the user, and now the answer is a
-		// key apart instead of a heuristic.
+		// right. The only thing that knows is the user.
 		//
-		// Shift+Enter stays wired to the same thing. It was the escape hatch
-		// before this, so somebody has it in their fingers, and a modifier that
-		// silently stops working is worse than one that is merely redundant.
+		// Shift+Enter stays wired to the same thing: it is a redundant but
+		// familiar spelling of the same gesture, and a modifier that silently
+		// stops working is worse than one that is merely redundant.
 		s.commitLiteral(client)
 		return true, true
 
@@ -870,17 +862,15 @@ func (s *imeSession) setPendingShiftClient(client unsafe.Pointer) {
 
 // toggleLanguage switches between Chinese input and pass-through English.
 func (s *imeSession) toggleLanguage(client unsafe.Pointer) {
-	// Anything half-composed goes in AS LETTERS, not as its top candidate.
+	// Anything half-composed goes in AS LETTERS, not as its top candidate: a
+	// Shift tap is a statement about the letters already typed, so it has to be
+	// retroactive. Committing the candidate instead would make the gesture
+	// unusable for the case it is most wanted in — typing "go" offers 公
+	// (correctly, those letters are pinyin), and tapping Shift to say "that was
+	// English" must not leave 公 on screen and force a retype.
 	//
-	// This used to commit the candidate, and that made the gesture unusable for
-	// the case it is most wanted in: typing "go" offers 公 (correctly — in
-	// Chinese mode those letters are pinyin), and tapping Shift to say "that
-	// was English" produced 公 followed by an English mode. The letters were
-	// gone and had to be retyped.
-	//
-	// A Shift tap is a statement about the letters already typed, so it has to
-	// be retroactive: the same escape hatch as Enter, reached by the key that
-	// also says what to do next. See commitLiteral.
+	// This is the same escape hatch as Enter, reached by the key that also says
+	// what to do next. See commitLiteral.
 	if s.composing() {
 		s.commitLiteral(client)
 	}
@@ -1042,9 +1032,9 @@ func (s *imeSession) setCandidates() {
 // More than the last word, because a phrase gets typed a piece at a time. 博物
 // committed as one word and 博物 committed as 博 then 物 put the same three
 // characters on screen; asking only about 物 finds 物馆, which is not a word, and
-// 博物馆 is never reached. Every length is tried rather than just the longest
-// because the pieces may not belong together at all — 我 then 说, and there is no
-// phrase 我说… to continue, only whatever follows 说.
+// 博物馆 is never reached. The pieces may also not belong together at all — 我
+// then 说, and there is no phrase 我说… to continue, only whatever follows 说 —
+// so each candidate run is checked before it is queried.
 //
 // The lengths that cannot possibly extend into a phrase never reach the lexicon
 // query: MayContinue rejects them with a few trie steps.
@@ -1056,13 +1046,11 @@ func (s *imeSession) setCandidates() {
 // # Two queries, not one per length
 //
 // Engine.Continuations costs a full ranked lookup over the joined reading plus
-// the input, and that is the expensive half of a keystroke: measured on the
-// shipped lexicon, three lengths took 1.5ms per keystroke against 90µs with no
-// context at all. So only two lengths are asked about — the last committed word,
-// which is the behaviour this feature already had and must not lose, and the
-// LONGEST joined run the lexicon could extend. The lengths in between are the
-// least informative: whatever a middle run can continue, the longest run
-// usually continues too, and more specifically.
+// the input, and that is the expensive half of a keystroke. So only two lengths
+// are asked about — the last committed word, and the LONGEST joined run the
+// lexicon could extend. The lengths in between are the least informative:
+// whatever a middle run can continue, the longest run usually continues too,
+// and more specifically.
 func (s *imeSession) continuations() []engine.Candidate {
 	if s.buffer == "" || len(s.recent) == 0 {
 		return nil
@@ -1260,12 +1248,10 @@ func reserveEnglishSlot(cands []engine.Candidate, pageSize int) []engine.Candida
 // meant xi'an) and fix it with an apostrophe rather than deleting everything
 // and wondering what went wrong.
 //
-// It shows the typed letters and NOTHING ELSE. An earlier version spelled out
-// the candidate's reading instead, which put letters on screen that were
-// never pressed — type "h" and the preedit read "huo", because that is how
-// the engine understood it. The engine's interpretation belongs in the
-// candidate list, which is where the user can accept or reject it; the
-// preedit is a record of what they typed.
+// It shows the typed letters and NOTHING ELSE. The engine's interpretation
+// belongs in the candidate list, which is where the user can accept or reject
+// it; the preedit is a record of what they typed, and a reading may spell out
+// letters that were never pressed ("h" is understood as "huo").
 func (s *imeSession) preedit() string {
 	if s.englishMode || s.emojiMode {
 		// Literal text: there are no syllables to segment and no separators to

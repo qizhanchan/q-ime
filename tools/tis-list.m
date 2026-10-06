@@ -1,6 +1,6 @@
 // tis-list.m — does the OS actually know about our input method?
 //
-// This exists because the failure mode that blocked step 1 is SILENT:
+// This exists because the failure mode is SILENT:
 // TISRegisterInputSource returns noErr, LaunchServices logs a successful
 // bundle registration, the process launches and stays up — and the input
 // source is still absent from the Text Input Source database, so it never
@@ -111,7 +111,7 @@ int main(int argc, const char *argv[]) {
 
         if (hits == 0) {
             printf("\nNOT in the TIS database — it will not appear in System "
-                   "Settings.\nSee the \"blocked on\" section of README.md.\n");
+                   "Settings.\nSee the registration notes in docs/arch.md.\n");
             return 1;
         }
         return 0;

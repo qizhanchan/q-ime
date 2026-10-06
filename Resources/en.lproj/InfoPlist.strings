@@ -1,7 +1,7 @@
 /* Localized names for the input source. The KEY is the input mode id from
    Info.plist's tsInputModeListKey; without this, System Settings shows the
    raw identifier instead of a readable name. */
-"com.qizhanchan.inputmethod.Hans" = "qui Pinyin (spike)";
+"com.qizhanchan.inputmethod.Hans" = "qui Pinyin";
 
 /* The section header macOS puts above our own items in the input-source
    menu. Without this key the menu shows the literal string "CFBundleName" —

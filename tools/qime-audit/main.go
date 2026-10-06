@@ -1,10 +1,10 @@
 // Command qime-audit measures what typo correction costs and what it buys,
 // against the real lexicon.
 //
-//	go build -o /tmp/qime-audit ./apps/q-ime/tools/qime-audit
-//	/tmp/qime-audit -dict apps/q-ime/build/lexicon.bin
+//	go build -o /tmp/qime-audit ./tools/qime-audit
+//	/tmp/qime-audit -dict build/lexicon.bin
 //
-// Two numbers, and they pull in opposite directions:
+// Three measurements, and they pull in different directions:
 //
 //   - HARM — of the N commonest readings, how many get a different first
 //     candidate once correction is turned on. This must be ZERO. Correction
@@ -12,20 +12,12 @@
 //     it is the input method disagreeing with the keyboard.
 //   - RECOVERY — of the same readings, perturbed by one slip each, how many
 //     put the original word back on top.
+//   - COVERAGE (-mode coverage) — cases where a reading that explains only
+//     part of the input outranks one that explains all of it.
 //
-// # Why this is a tool and not a test
-//
-// It ran once, by hand, when transposition correction was written; the
-// resulting 0/2880 and 98.6% are quoted in the README and in the comment on
-// typoPenalty, and that was the entire evidence for turning correction on by
-// default. But a number in a comment cannot be re-derived, cannot be checked
-// against a rebuilt lexicon, and cannot say whether a NEW kind of correction
-// is safe. Widening the edit set — substitution, insertion, deletion, which is
-// where this is going — changes the harm figure by construction, so the
-// measurement has to be something anyone can run in thirty seconds.
-//
-// It is not a `go test` because it needs the 77MB GPL lexicon, which is not in
-// the repo: a test that skips on every machine but one is not a test.
+// It is not a `go test` because it needs the GPL lexicon, which is not in the
+// repo: a test that skips on every machine but one is not a test. It is what
+// lets a number in a comment be re-derived after a rebuild.
 package main
 
 import (
@@ -45,11 +37,11 @@ import (
 
 func main() {
 	var (
-		path    = flag.String("dict", "apps/q-ime/build/lexicon.bin", "compiled lexicon")
+		path    = flag.String("dict", "build/lexicon.bin", "compiled lexicon")
 		top     = flag.Int("n", 2880, "how many of the commonest readings to audit")
 		mode    = flag.String("mode", "typo", "typo | coverage | golden")
 		edit    = flag.String("edit", "transpose", "perturbation: transpose")
-		goldens = flag.String("golden", "apps/q-ime/testdata/golden.tsv", "pinned-rankings file for -mode golden")
+		goldens = flag.String("golden", "testdata/golden.tsv", "pinned-rankings file for -mode golden")
 		noEn    = flag.Bool("noen", false, "leave the English word list out")
 		fuzzy   = flag.Bool("fuzzy", false, "enable the common fuzzy rules")
 		verbose = flag.Bool("v", false, "list every harmed reading and every miss")
@@ -109,9 +101,9 @@ func main() {
 	// Without the split the headline number is meaningless. A correction that
 	// works on syllable-internal arcs cannot possibly repair a slip that swapped
 	// the last letter of one syllable with the first of the next — no single
-	// chunk contains the fix — and the README says so explicitly. Averaging the
-	// two together reports a low percentage that no change to the engine would
-	// move, which is the shape of a metric people learn to ignore.
+	// chunk contains the fix. Averaging the two together reports a low
+	// percentage that no change to the engine would move, which is the shape of
+	// a metric people learn to ignore.
 	var in, out counter
 	var readingsHit int
 	var missed []miss
@@ -165,11 +157,11 @@ func main() {
 		}
 	}
 
-	// The misses are the interesting half of the recovery number: when
-	// transposition correction was written, most of the 40 turned out not to be
-	// failures at all — "nahui" mistyped is itself 那会, and the engine
-	// preferring what was actually typed is the guard working. Anyone widening
-	// the edit set needs to read this list, not just the percentage.
+	// The misses are the interesting half of the recovery number: many turn
+	// out not to be failures at all — the mistyped string is itself another
+	// legal, common reading, and the engine preferring what was actually typed
+	// is the guard working. Anyone widening the edit set needs to read this
+	// list, not just the percentage.
 	if len(missed) > 0 {
 		fmt.Printf("\nmisses (%d), the ones worth reading by hand:\n", len(missed))
 		for i, m := range missed {
@@ -279,8 +271,14 @@ func goldenAudit(d *dict.Reader, path string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
 	}
-	failures := golden.Run(e, cases)
-	fmt.Printf("GOLDEN    pinned rankings hold: %d / %d\n", len(cases)-len(failures), len(cases))
+	hasLite := golden.HasTencentLite(d)
+	failures, skipped := golden.Run(e, cases, hasLite)
+	total := len(cases) - skipped
+	fmt.Printf("GOLDEN    pinned rankings hold: %d / %d", total-len(failures), total)
+	if skipped > 0 {
+		fmt.Printf(" (%d lite-only cases skipped: lexicon built without tencent_lite)", skipped)
+	}
+	fmt.Println()
 	if len(failures) == 0 {
 		return 0
 	}
@@ -366,11 +364,9 @@ func editNames() string {
 
 // transposeAll returns the input with each adjacent pair swapped in turn.
 //
-// Every position rather than one sampled one: which single swap an earlier
-// measurement used is not recorded anywhere, so a "one per reading" figure
-// could not be reproduced even in principle. Reporting per-SWAP recovery is
-// both deterministic and a stricter question — it asks whether the correction
-// works wherever the slip lands, not whether it works somewhere.
+// Every position rather than one sampled one: reporting per-SWAP recovery is
+// deterministic and stricter — it asks whether the correction works wherever
+// the slip lands, not whether it works somewhere.
 func transposeAll(s string) []variant {
 	var out []variant
 	seen := map[string]bool{s: true}

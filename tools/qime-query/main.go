@@ -1,6 +1,6 @@
 // Command qime-query runs the input method's engine from a shell.
 //
-//	go run ./apps/q-ime/tools/qime-query -dict /tmp/lexicon.bin nihao zhg womenmingtianqubeijing
+//	go run ./tools/qime-query -dict build/lexicon.bin nihao zhg womenmingtianqubeijing
 //
 // The engine is the half of q-ime that decides whether it is pleasant to
 // type with, and it is also the half that cannot be judged from a unit test

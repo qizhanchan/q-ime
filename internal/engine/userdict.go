@@ -198,13 +198,8 @@ func userKey(reading []string, word string) string {
 // A namespace of its own, because the two kinds of memory answer different
 // questions. A reading key asks "which word did you mean by these sounds"; a
 // literal key asks "how do you spell the thing you type as these letters", and
-// "AfterShip" is not a reading of anything.
-//
-// This comment used to say that a reading key "only ever has to RANK words the
-// lexicon already knows", and that was the bug: 业务侧 is not a lexicon word, so
-// once built out of two commits it was recorded and then never looked up again —
-// exactly the wall this namespace was created to get around for English. Reading
-// keys now PRODUCE too, through the phrases index and LearnedPhrases.
+// "AfterShip" is not a reading of anything. Reading keys also PRODUCE now,
+// through the phrases index and LearnedPhrases.
 //
 // The \x01 prefix cannot collide with a reading key, whose first byte is always
 // a letter, so both live in one map and one file.
@@ -216,13 +211,9 @@ func literalKey(code, word string) string {
 // several deliberate picks, recorded as one word.
 //
 // The fourth namespace, and it has to be a namespace rather than a flag on the
-// reading entries, because those cannot be trusted to produce. Measured on a
-// real history: of 754 multi-syllable reading entries, 49 were words the lexicon
-// does not have — 或这, 嗯俄国, 读书哦好, 按来嗯 — every one of them an
-// accidental sentence commit of exactly the kind the README documents under "用
-// 户词典的 boost 不能在整句里累加". Recorded, and harmlessly inert as long as
-// nothing could look them up. Reading THAT namespace to produce candidates would
-// have promoted all 49 to full-coverage matches the lexicon can never outrank.
+// reading entries, because those cannot be trusted to produce: reading entries
+// also hold accidental sentence commits, and reading them to produce candidates
+// would promote those to full-coverage matches the lexicon can never outrank.
 //
 // Only coinPhrase writes here, and only when every piece of the composition was
 // deliberately picked. That is the difference between "this text passed through"
@@ -300,9 +291,7 @@ func (u *UserDict) scaledBoostLocked(e *userEntry, base, scale float64) float64 
 // Typing 真 then `b` and expecting 不错 asks for a two-syllable word out of one
 // letter, and nothing in the search produces it: the completion path walks ONE
 // extra syllable and takes only the first handful of children, so 不错 is not a
-// low-ranked candidate for `b`, it is not a candidate at all. Measured against
-// the real lexicon before this was written — 不错 appears nowhere in 60 results
-// for `b`, nor for `bu`.
+// low-ranked candidate for `b`, it is not a candidate at all.
 //
 // So the context has to be able to OFFER the word, which means knowing how it
 // is spelled in pinyin. Keeping the reading here costs a few bytes per pair and
@@ -373,12 +362,12 @@ func (u *UserDict) RecordBigram(prev string, reading []string, word string) {
 // spelling if it was learned as one. Returns how many entries went.
 //
 // All three namespaces at once, deliberately. Half-forgetting is worse than not
-// offering the gesture at all — the reported case had guan→关 AND 博物→关, both
-// written by the same two accidental commits, and dropping only the pair leaves
-// 关 first on its unigram boost so nothing visibly happens. What the user is
-// asking for is "stop letting my own history put this here", and the answer has
-// to be complete enough that the candidate actually falls back to what the
-// lexicon says.
+// offering the gesture at all: if a pick and the pair with prev were written by
+// the same accidental commits, dropping only the pair leaves the word first on
+// its unigram boost, so nothing visibly happens. What the user is asking for is
+// "stop letting my own history put this here", and the answer has to be
+// complete enough that the candidate actually falls back to what the lexicon
+// says.
 //
 // Deleting a key that was never there is free, so the caller does not have to
 // know which namespace a candidate came from.
@@ -710,13 +699,12 @@ func (u *UserDict) LearnedPhrases(first byte, limit int) []LearnedPhrase {
 // evictLocked drops the n least valuable entries to keep the file bounded.
 //
 // "Least valuable" is the boost arithmetic itself — ln(count+1) plus the
-// decaying recency slot — not raw age. Sorting on Last alone threw away a
-// word picked two hundred times three months ago before a word mistyped once
-// two months ago, which deletes exactly the history the dictionary is FOR:
-// the long-lived vocabulary of whoever uses the input method most. The bases
-// differ per namespace but are constants, so ranking every entry with the
-// same formula preserves each namespace's internal order, which is all an
-// eviction has to get right.
+// decaying recency slot — not raw age. Sorting on Last alone would throw away a
+// word picked many times months ago before a word mistyped once, which deletes
+// exactly the history the dictionary is FOR: the long-lived vocabulary of
+// whoever uses the input method most. The bases differ per namespace but are
+// constants, so ranking every entry with the same formula preserves each
+// namespace's internal order, which is all an eviction has to get right.
 func (u *UserDict) evictLocked(n int) {
 	type kv struct {
 		k     string
@@ -770,6 +758,7 @@ func (u *UserDict) ForgetAll() {
 	u.entries = make(map[string]*userEntry)
 	u.literals = make(map[string][]string)
 	u.successors = make(map[string][]bigramRef)
+	u.phrases = make(map[byte][]phraseRef)
 	u.gen++
 	u.rewriteLocked()
 	u.mu.Unlock()

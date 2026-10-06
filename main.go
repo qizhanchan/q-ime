@@ -1,9 +1,8 @@
 // q-ime is a macOS input method whose candidate window is drawn by qui.
 //
-// Step 3 of the plan in README.md: the IMK plumbing proven in step 1 and the
-// non-activating transparent panel proven in step 2, wired together. The
-// pinyin "engine" is still a lookup table (engine.go) — this step is about
-// whether the three parts can coexist in one process at all:
+// This file wires the three parts into one process: the InputMethodKit server
+// that receives keys, the non-activating qui overlay panel that draws
+// candidates, and the pinyin engine. Two constraints shape everything here:
 //
 //   - InputMethodKit needs the AppKit run loop serviced so its mach port
 //     delivers key events;

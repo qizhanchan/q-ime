@@ -36,7 +36,7 @@ int qimeBridgeServerStart(void);
 
 // qimeBridgeRegisterSelf runs TISRegisterInputSource on our own bundle. Only
 // makes the input source visible for the current login session — the
-// durable registration happens at login. See README.
+// durable registration happens at login.
 int qimeBridgeRegisterSelf(void);
 
 // --- client lifetime -------------------------------------------------

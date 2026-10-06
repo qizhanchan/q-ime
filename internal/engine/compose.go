@@ -101,10 +101,8 @@ const altsPerStep = 2
 //
 //  2. It actively hurts, because the boosts compound. A boost is calibrated
 //     to lift one word above its same-reading rivals; adding one per word in
-//     a chain lets a five-character sentence collect five of them. With 39
-//     learned words, "hello" scored 或+嗯+来+来+哦 at 24.10 against 合理 at
-//     11.80 — the learned single characters, none of them wrong on their own,
-//     summing into a sentence nobody would want.
+//     a chain lets a five-character sentence collect five of them, summing
+//     into a sentence nobody would want.
 func (e *Engine) compose(lat lattice, input string, budget *int) []Candidate {
 	n := len(input)
 	if n < 2 {

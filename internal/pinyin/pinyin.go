@@ -223,9 +223,8 @@ func DropOne(s string) []string {
 // is load-bearing. A key REPEAT is the insertion error fingers actually make;
 // an arbitrary-drop rule additionally claims "the letter you just typed was
 // never meant", which collides head-on with the trailing-onset abbreviation:
-// it read "lihail" as 厉害 + a slipped l — explaining away the exact letter
-// the user typed ON PURPOSE to reach 厉害了, and re-opening the abandonment
-// bug that raising coverBonus to 6.5 was measured to close.
+// the trailing letter of an abbreviation would be explained away as a slip,
+// re-opening the abandonment problem coverBonus is sized to close.
 func Undouble(s string) []string {
 	var out []string
 	seen := map[string]bool{}

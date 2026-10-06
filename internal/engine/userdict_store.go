@@ -17,10 +17,6 @@ import (
 // past journalCompactBytes, or after a change too broad to journal (eviction,
 // forget-all), is the snapshot rewritten and the journal dropped.
 //
-// Rewriting the snapshot on every save was the obvious design and a costly one:
-// a single learned word rewrote a megabyte, every twenty seconds of typing, and
-// added up to gigabytes over a couple of weeks of uptime.
-//
 // Records are absolute states, so replaying one twice is harmless. That is what
 // makes compaction crash-safe without fsync choreography: a crash between
 // renaming the new snapshot into place and removing the journal replays records

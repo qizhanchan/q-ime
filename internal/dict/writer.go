@@ -68,9 +68,8 @@ func (b *Builder) SyllableID(s string) (uint16, bool) {
 }
 
 // Add records word under the given syllable sequence. Re-adding the same
-// word at the same key keeps the higher weight, which is what lets several
-// source dictionaries be merged with "first file wins" semantics by feeding
-// them in priority order.
+// word at the same key keeps the higher weight, which is what lets a later
+// source promote an overlapping entry without dropping anything.
 func (b *Builder) Add(syls []uint16, word string, weight uint32) {
 	if word == "" || len(syls) == 0 || len(syls) > MaxSyllables {
 		return

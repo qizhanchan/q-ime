@@ -2,21 +2,15 @@
 //
 //	读音'带'撇	词	权重
 //
-//	go run ./apps/q-ime/tools/dictdump build/lexicon.bin | sort > /tmp/a.tsv
+//	go run ./tools/dictdump build/lexicon.bin | sort > /tmp/a.tsv
 //
 // # Why this exists
 //
 // Every other tool here answers "what does the engine do with this input".
 // This one answers "what is actually IN the file", which is a different
-// question and the only way to check a claim about a dictionary CHANGE.
-//
-// It was written to settle one: adding tencent_lite promotes ~165k entries,
-// and "promote" sounds like something else has to give way — a lower-weighted
-// neighbour pushed past TrimPostings' 96-per-reading cap. Dumping both builds
-// and diffing showed 164942 weights up, 0 down, 0 evicted, 723 added, so the
-// merge is strictly monotone. That is a fact about two 77MB binaries; it
-// cannot be read off the source, and asserting it in a comment without a way
-// to re-derive it is exactly what the audit tool exists to avoid.
+// question and the only way to check a claim about a dictionary CHANGE — for
+// example that adding tencent_lite only promotes entries (weights up, none
+// down, none evicted) rather than displacing neighbours past TrimPostings.
 //
 // Output is deliberately dumb and line-oriented: the interesting operations
 // are `comm` and `join` against another dump, not anything this program

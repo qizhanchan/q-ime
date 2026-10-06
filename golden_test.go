@@ -10,7 +10,7 @@ import (
 // TestGoldenRankings replays testdata/golden.tsv — every pinned "this input
 // answers this word" decision — against the real lexicon. Same file, same
 // runner as `qime-audit -mode golden`; this is just the version the machine
-// runs on every `go test ./apps/q-ime`.
+// runs on every `go test .`.
 //
 // Skips where the lexicon is absent, like every other test in this package
 // that needs it: the lexicon is GPL data compiled on the developer's machine
@@ -41,7 +41,12 @@ func TestGoldenRankings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, f := range golden.Run(e, cases) {
+	hasLite := golden.HasTencentLite(d)
+	failures, skipped := golden.Run(e, cases, hasLite)
+	if skipped > 0 {
+		t.Logf("skipped %d lite-only cases: lexicon built without tencent_lite", skipped)
+	}
+	for _, f := range failures {
 		t.Errorf("%s", f)
 	}
 }

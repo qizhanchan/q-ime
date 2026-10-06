@@ -17,8 +17,8 @@
 #
 # Deliberately a hand-built bundle rather than an Xcode project: the point is
 # to see exactly which Info.plist keys and which signing steps are
-# load-bearing. The binary is Go (cgo) since step 3 — the IMK shim is
-# bridge_darwin.m inside the same package.
+# load-bearing. The binary is Go (cgo); the IMK shim is bridge_darwin.m inside
+# the same package.
 
 set -euo pipefail
 
@@ -28,44 +28,65 @@ BUILD_DIR="$HERE/build"
 APP="$BUILD_DIR/$APP_NAME.app"
 INSTALL_DIR="$HOME/Library/Input Methods"
 MIN_MACOS="13.0"
-# The compiled dictionary and where its sources come from. Override RIME_ICE
-# to build against a different checkout.
+# The compiled dictionary and where its sources come from.
+#
+# rime-ice is a git submodule at third_party/rime-ice, checked out shallow.
+# Override RIME_ICE to build against a different checkout.
 LEXICON="lexicon.bin"
-RIME_ICE="${RIME_ICE:-/opt/test/rime-ice}"
+RIME_ICE="${RIME_ICE:-$HERE/third_party/rime-ice}"
 # Optional extra source, outside the rime-ice checkout: the refined subset of
 # the tencent word list. Absent is fine — the lexicon just loses the re-ranking
 # it buys (see tools/dictc, tencentLite).
-TENCENT_LITE="${TENCENT_LITE:-/opt/test/tencent_lite.dict.yaml}"
+TENCENT_LITE="${TENCENT_LITE:-$HERE/third_party/tencent_lite.dict.yaml}"
 # "-" is ad-hoc. Set IDENTITY to a Developer ID to sign for real.
 IDENTITY="${IDENTITY:--}"
 
+# rime_ice_present is the check for a usable checkout. It tests for a file
+# rather than the directory: an uninitialised submodule leaves an empty
+# third_party/rime-ice behind, which a `-d` test would accept.
+rime_ice_present() {
+    [ -f "$RIME_ICE/cn_dicts/base.dict.yaml" ]
+}
+
+# require_rime_ice fails with the one command that fixes the common case.
+require_rime_ice() {
+    rime_ice_present && return 0
+    cat >&2 <<EOF
+error: rime-ice not found at $RIME_ICE
+
+If this is a fresh clone, initialise the submodule:
+
+  git submodule update --init --depth 1
+
+Or point RIME_ICE at an existing checkout:
+
+  RIME_ICE=/path/to/rime-ice ./build.sh install
+EOF
+    return 1
+}
+
 # do_lexicon compiles the rime-ice dictionaries into the binary lexicon the
 # input method mmaps. Skipped when the output is already newer than the
-# compiler — it takes a couple of seconds and produces ~77MB, so rebuilding it
-# on every code change would dominate the edit/test loop.
+# compiler and the sources — it produces ~77MB, so rebuilding it on every code
+# change would dominate the edit/test loop.
 do_lexicon() {
     local out="$HERE/build/$LEXICON"
     mkdir -p "$HERE/build"
-    if [ ! -d "$RIME_ICE" ]; then
+    if ! rime_ice_present; then
         if [ -f "$out" ]; then
-            echo "note: $RIME_ICE not found; reusing existing $out" >&2
+            echo "note: rime-ice not found at $RIME_ICE; reusing existing $out" >&2
             return 0
         fi
-        cat >&2 <<EOF
-error: no dictionary source and no previously built lexicon.
-
-Clone the rime-ice dictionaries, or point RIME_ICE at an existing checkout:
-
-  git clone --depth 1 https://github.com/iDvel/rime-ice $RIME_ICE
-  RIME_ICE=/path/to/rime-ice ./build.sh install
-EOF
-        return 1
+        require_rime_ice || return 1
     fi
     local lite=()
     if [ -f "$TENCENT_LITE" ]; then
         lite=(-lite "$TENCENT_LITE")
     fi
-    if [ -f "$out" ] && [ ! "$HERE/tools/dictc/main.go" -nt "$out" ]; then
+    if [ -f "$out" ] &&
+        [ ! "$HERE/tools/dictc/main.go" -nt "$out" ] &&
+        [ ! "$RIME_ICE/cn_dicts/base.dict.yaml" -nt "$out" ] &&
+        { [ ! -f "$TENCENT_LITE" ] || [ ! "$TENCENT_LITE" -nt "$out" ]; }; then
         echo "lexicon up to date ($(du -h "$out" | cut -f1))"
         return 0
     fi
@@ -82,10 +103,7 @@ EOF
 # than on every build. A build that silently rewrote a tracked file would make
 # "did the word list change?" unanswerable from git.
 do_english() {
-    if [ ! -d "$RIME_ICE" ]; then
-        echo "error: $RIME_ICE not found; set RIME_ICE to a rime-ice checkout" >&2
-        return 1
-    fi
+    require_rime_ice || return 1
     ( cd "$HERE" && go run ./tools/engc \
         -src "$RIME_ICE/en_dicts" \
         -o ./internal/english/data/english.txt )
@@ -99,7 +117,7 @@ do_build() {
     printf 'APPL????' > "$APP/Contents/PkgInfo"
     # The icon is not decoration: an input method whose icon key points at a
     # missing file is silently absent from System Settings. The .lproj
-    # bundles supply the input source's readable name. See README.
+    # bundles supply the input source's readable name. See docs/arch.md.
     cp -R "$HERE/Resources/"* "$APP/Contents/Resources/"
     # The lexicon rides in Resources, which is where engine.go looks first.
     cp "$HERE/build/$LEXICON" "$APP/Contents/Resources/$LEXICON"
@@ -159,7 +177,7 @@ do_install() {
     open "$INSTALL_DIR/$APP_NAME.app"
     if [ "$ok" != 1 ]; then
         echo "WARNING: registered without error but the input source is still" >&2
-        echo "not in the TIS database. See README, \"the .inputmethod. trap\"." >&2
+        echo "not in the TIS database. See docs/arch.md, \"the .inputmethod. trap\"." >&2
     fi
     cat <<EOF
 
@@ -176,16 +194,16 @@ just switch away from the input method and back to pick up the new binary.
 
 Then enable it by hand (this part cannot be scripted):
   System Settings > Keyboard > Input Sources > Edit… > + > Chinese, Simplified
-  pick "qui 拼音 (spike)", then switch to it with Ctrl-Space.
+  pick "qui 拼音", then switch to it with Ctrl-Space.
 
 Then in any text field: type  nihao  and press space.
 EOF
 }
 
-# Install system-wide. Both known-good references (Sogou, and the
-# ensan-hcl sample) live in /Library/Input Methods, and a registration into
-# ~/Library/Input Methods was observed to be TRANSIENT on macOS 26 — present
-# right after --register, gone a minute later. See README.
+# Install system-wide. A registration into ~/Library/Input Methods is transient:
+# the entry can disappear a minute after --register, while a bundle under
+# /Library/Input Methods (root-owned) keeps its registration. That is also why
+# the secure-input fallback works from there. See docs/arch.md.
 #
 # NOT doing what the sample's README says ("sudo chmod -R 777
 # /Library/Input Methods"). A world-writable directory that the OS loads

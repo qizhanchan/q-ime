@@ -209,10 +209,9 @@ func TestTypoCorrectionAllowsOneSlipPerReading(t *testing.T) {
 // than a ranking, so it stays true if the lexicon or the other constants move.
 //
 // It deliberately does NOT pin the VALUE of typoPenalty — setting the constant
-// to zero leaves this test green, which was confirmed by mutation. What it
-// catches is the penalty being charged twice, or not at all, for one swap. The
-// value itself cannot be defended from a dictionary this size; it comes from
-// the two-sided audit against the shipped lexicon that the README records.
+// to zero leaves this test green. What it catches is the penalty being charged
+// twice, or not at all, for one swap. The value itself is measured by the
+// two-sided audit in tools/qime-audit.
 func TestTypoCorrectionCostsExactlyOnePenalty(t *testing.T) {
 	e := newTypoEngine(t)
 	exact := scoreOf(t, e.Candidates("ping", 10), "平")

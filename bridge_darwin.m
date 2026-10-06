@@ -52,29 +52,17 @@ static __weak IMKInputController *gController = nil;
 //                                                          keybinding")
 //   3. handleEvent:client:                                (raw NSEvent)
 //
-// This file used to implement 2 AND didCommandBySelector: from 1, which does
-// not work and is what the header is warning about: approach 2 is documented
-// as delivering key events *without the keybinding*, so didCommandBySelector:
-// was NEVER called. Backspace, Escape and the arrow keys were handled by
-// code that could not run — backspace fell through to the "pass it on"
-// branch and looked like the composition being abandoned.
+// Approach 3 is the only one that sees modifier transitions, which the
+// Shift-to-switch-language gesture needs, and it also carries key-downs,
+// unpacked below. Approach 2 is documented as delivering key events *without
+// the keybinding*, so didCommandBySelector: would never be called alongside
+// it; and implementing both 2 and 3 makes IMK pick one, which is how
+// flags-changed ends up never arriving. Approach 3 alone is deliberate, and
+// so is not calling super (super performs the approach 1/2 dispatch, and both
+// paths live would double-handle every key).
 //
-// Approach 3 gets everything through one door: modifier transitions (which
-// only exist here, and which the Shift-to-switch-language gesture needs) and
-// key-downs, which are unpacked below exactly as approach 2 would have.
-// Special keys are dispatched by KEY CODE on the Go side, since that is now
-// the only thing that identifies them.
-//
-// inputText:key:modifiers:client: is deliberately ABSENT.
-//
-// It was kept for one build as a fallback, and that is what proved IMK
-// chooses at most one approach: with it present, keys arrived (the log's
-// "first key received" line) but flags-changed NEVER did, so the Shift
-// gesture could not fire. IMK had selected approach 2 and was not calling
-// this method at all. Removing it is what makes approach 3 the only option.
-//
-// Not calling super either: super's implementation performs the approach 1/2
-// dispatch, and having both paths live would double-handle every key.
+// Special keys are dispatched by KEY CODE on the Go side, since that is the
+// only thing that identifies them.
 - (BOOL)handleEvent:(NSEvent *)event client:(id)sender {
     @autoreleasepool {
         gController = self;
@@ -125,13 +113,11 @@ static __weak IMKInputController *gController = nil;
 // A pick from the 候选词数量 rows. The tag IS the candidate count.
 //
 // NO TARGET is set on those items, deliberately. IMK does not dispatch this
-// through the responder chain at all: the menu-bar agent hands the selector
-// back to IMK, whose doCommandBySelector:commandDictionary: performs it on the
-// controller. The header is explicit — "an input method merely needs to provide
-// actions for each menu item". Setting target:self was the second bug here; the
-// pointer cannot cross the process boundary, and with it set the pick never
-// arrived (no log line from anywhere, which is how it was told apart from the
-// sender-shape bug below).
+// through the responder chain: the menu-bar agent hands the selector back to
+// IMK, whose doCommandBySelector:commandDictionary: performs it on the
+// controller. The header is explicit — "an input method merely needs to
+// provide actions for each menu item" — and a target pointer cannot cross the
+// process boundary.
 //
 // THE SENDER IS NOT THE MENU ITEM. The input-source menu is rendered by the
 // system's menu-bar agent, in another process, so a pick comes back as what
@@ -140,24 +126,18 @@ static __weak IMKInputController *gController = nil;
 // reason, and the header says so: "An NSMenuItem in the infoDictionary passed
 // to menu item actions."
 //
-// The first version of this took `[sender tag]` behind an
-// isKindOfClass:[NSMenuItem class] guard, and the guard did exactly what it was
-// told: every pick returned silently and the setting never moved. Hence the log
-// line on the way out — an unrecognised sender shape is now noisy, because a
-// menu that quietly does nothing is indistinguishable from a menu that was
-// never wired up.
+// An unrecognised sender shape is logged rather than returned silently,
+// because a menu that quietly does nothing is indistinguishable from a menu
+// that was never wired up.
 //
-// Worth knowing if you go looking: those headers are ISO-8859 encoded, so grep
-// treats them as binary and finds nothing. Use `grep -a`.
-// Every command IMK routes here from the input-method menu, logged, then
-// handled by IMK's own implementation — which is what looks the selector up on
-// this controller and performs it with the infoDictionary.
+// Worth knowing if you go looking: those headers are ISO-8859 encoded, so
+// grep treats them as binary and finds nothing. Use `grep -a`.
 //
-// Pure instrumentation: super does the work. It exists because the two bugs in
-// this menu were both invisible — a pick that goes nowhere and a menu that was
-// never wired up produce exactly the same nothing — and this is the one place
-// that can tell them apart, being the documented door every menu command comes
-// through.
+// Each command IMK routes here from the input-method menu is logged, then
+// handled by IMK's own implementation. Pure instrumentation: super does the
+// work. It exists because "a pick that goes nowhere" and "a menu that was
+// never wired up" produce exactly the same nothing, and this is the one
+// documented door every menu command comes through.
 - (void)doCommandBySelector:(SEL)aSelector commandDictionary:(NSDictionary *)infoDictionary {
     qimeBridgeGoLog((char *)[[NSString stringWithFormat:@"menu command: %@",
                               NSStringFromSelector(aSelector)] UTF8String]);
@@ -214,15 +194,14 @@ static __weak IMKInputController *gController = nil;
 
     // How many candidates the panel offers.
     //
-    // FLAT rows under a disabled label, not a submenu. Nothing in IMK documents
-    // a nested menu surviving the trip to the menu-bar agent, and a submenu was
-    // the first shape this took: the rows drew and could be clicked, and the
-    // pick never came back. Indentation buys the grouping a submenu was there
-    // for, and costs nothing that has to be serialized.
+    // FLAT rows under a disabled label, not a submenu: nothing in IMK
+    // documents a nested menu surviving the trip to the menu-bar agent.
+    // Indentation buys the grouping a submenu was there for, and costs
+    // nothing that has to be serialized.
     //
-    // The bounds come from Go rather than from the numbers written out a second
-    // time here: one place decides what is allowed, and it is the place that
-    // enforces it.
+    // The bounds come from Go rather than from the numbers written out a
+    // second time here: one place decides what is allowed, and it is the
+    // place that enforces it.
     int lo = 0, hi = 0;
     qimeBridgeGoPageSizeBounds(&lo, &hi);
     int current = (int)qimeBridgeGoPageSize();
@@ -341,28 +320,18 @@ static id<IMKTextInput> quiClient(void *client) {
 // The marked text is sent as an ATTRIBUTED string built by IMK's own helper,
 // not as a bare NSString and not with attributes assembled here.
 //
-// IMKInputSession.h says a plain NSString "will produce default marking", and
-// that is what this used to pass. Default marking draws an underline and
-// carries no NSMarkedClauseSegment attribute — which is how a client learns
-// that the marked run is one editable unit. Cocoa text views cope; a client
-// that maintains its own composition model does not. Java/Swing maps clause
-// segments onto AWT InputMethodHighlight runs and derives the caret from them,
-// which is the shape of "the insertion point sits at the start of the preedit
-// in GoLand, and is fine in Slack and browsers".
+// IMKInputSession.h says a plain NSString "will produce default marking".
+// Default marking draws an underline and carries no NSMarkedClauseSegment
+// attribute — which is how a client learns that the marked run is one editable
+// unit. Cocoa text views cope; a client that maintains its own composition
+// model does not. Java/Swing maps clause segments onto AWT
+// InputMethodHighlight runs and derives the caret from them.
 //
-// The first attempt at this set the attributes by hand with
-// NSMarkedClauseSegment = 0, on the strength of AppKit's documentation for
-// that key ("Clause segment index"). It did not fix GoLand, and the reason is
-// in IMKInputController.h instead: markForStyle:atRange: adds "the appropriate
-// underline and underline color information" for a TSM hilite style and then
-// stores THE STYLE ITSELF under NSMarkedClauseSegment. The styles start at 1
-// (kTSMHiliteCaretPosition), so 0 is not a style at all — a client reading the
-// attribute the way IMK writes it sees nothing valid.
-//
-// The two frameworks genuinely disagree about what that key means. Calling
-// Apple's helper sidesteps the disagreement: whatever it writes is by
-// definition what IMK's clients are built to read. It is also what Squirrel,
-// the Rime frontend, does.
+// The two frameworks disagree about what NSMarkedClauseSegment means: AppKit
+// documents it as a clause index, while markForStyle:atRange: stores THE STYLE
+// ITSELF under it, and TSM styles start at 1. Calling Apple's helper sidesteps
+// the disagreement — whatever it writes is by definition what IMK's clients
+// read. It is also what Squirrel, the Rime frontend, does.
 //
 // kTSMHiliteSelectedRawText, not kTSMHiliteConvertedText: the preedit is
 // romanised input the user is still editing, not text this input method has
@@ -394,9 +363,8 @@ static NSAttributedString *quiMarkedText(NSString *text) {
 // than where the marked text asked for it.
 //
 // This exists because that disagreement is invisible from this side unless we
-// ask, and because guessing at it twice was already once too often. It is
-// silent in a client that behaves, so it costs a log line only where there is
-// something to say.
+// ask. It is silent in a client that behaves, so it costs a log line only
+// where there is something to say.
 static void quiReportCaret(id<IMKTextInput> c, NSUInteger want) {
     static int reported = 0;
     if (reported >= 8) return; // one composition's worth, not a per-keystroke flood

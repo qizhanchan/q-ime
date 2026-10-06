@@ -1,5 +1,5 @@
 /* 见 en.lproj 的说明：key 是 Info.plist 里的 input mode id。 */
-"com.qizhanchan.inputmethod.Hans" = "qui 拼音 (spike)";
+"com.qizhanchan.inputmethod.Hans" = "qui 拼音";
 
 /* 输入法菜单里 macOS 加在我们自己那几项上方的分组标题。缺这个键时菜单显示的是
    字面量 "CFBundleName"——查不到就退回键名本身，而不是退回 Info.plist 的值。 */

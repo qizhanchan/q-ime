@@ -25,7 +25,7 @@ type lattice [][]sylArc
 // buildLattice segments raw input into the syllable readings the lexicon
 // could possibly want, without consulting the lexicon.
 //
-// Three kinds of arc, and the distinction between them is the whole
+// Four kinds of arc, and the distinction between them is the whole
 // difference between a toy segmenter and one that feels like a real IME:
 //
 //   - a FULL syllable ("hao"), optionally after a fuzzy substitution;
@@ -210,11 +210,10 @@ func (l lattice) hasTypoArc() bool {
 // does not exist, and offering 那 for "ni" is exactly how it looked.
 //
 // Typo arcs do not count as viability. A leftover that can only be read by
-// assuming it was mistyped is speculation squared — and it re-opened the
-// exact hole the real-syllable guard closes: with dropped-letter repair in
-// the lattice, "diu" leaves "iu" after the abbreviated reading "d", "iu"
-// repairs to diu, and the dead reading d → 对 came back from the dead for
-// input that spells 丢 correctly and completely.
+// assuming it was mistyped is speculation squared: it would defeat the
+// real-syllable guard, because dropped-letter repair turns the leftover of an
+// abbreviated reading into a legal syllable again. A reading for correctly
+// spelled input must not be kept alive that way.
 func (l lattice) canContinue(end, n int) bool {
 	if end >= n {
 		return true

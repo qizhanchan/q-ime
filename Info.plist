@@ -20,7 +20,7 @@
 	<key>CFBundleName</key>
 	<string>QuiIME</string>
 	<key>CFBundleDisplayName</key>
-	<string>qui 拼音 (spike)</string>
+	<string>qui 拼音</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleSignature</key>
@@ -41,9 +41,10 @@
 	<string>NSApplication</string>
 
 	<!-- The three keys that make this an input method rather than an app.
-	     InputMethodConnectionName is the mach service name main.m hands to
-	     IMKServer; InputMethodServerControllerClass is looked up BY NAME at
-	     runtime, so the class must survive linking (see main.m). -->
+	     InputMethodConnectionName is the mach service name bridge_darwin.m
+	     hands to IMKServer; InputMethodServerControllerClass is looked up BY
+	     NAME at runtime, so the class must survive linking (see
+	     bridge_darwin.m). -->
 	<key>InputMethodConnectionName</key>
 	<string>com.qizhanchan.inputmethod.qui_Connection</string>
 	<key>InputMethodServerControllerClass</key>

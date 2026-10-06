@@ -183,10 +183,9 @@ func New(d *dict.Reader, user *UserDict, fuzzy pinyin.Fuzzy) *Engine {
 	// Drop the keys that point everywhere. "zhon" names zhong and nothing
 	// else — strong evidence, one arc. "hi" could be the remains of hai, chi,
 	// shi or zhi — which is to say it says almost nothing, and offering all
-	// four turns every "zhi" keystroke into a fan-out over their subtrees:
-	// measured on the shipped lexicon, keeping ambiguous keys took the query
-	// for plain "zhi" from ~0.5ms to ~2.8ms. An over-ambiguous repair is weak
-	// exactly in proportion to what it costs, so it is not offered at all.
+	// four turns every "zhi" keystroke into a fan-out over their subtrees. An
+	// over-ambiguous repair is weak exactly in proportion to what it costs, so
+	// it is not offered at all.
 	for k, ids := range e.delIndex {
 		if len(ids) > maxDeletionRepairs {
 			delete(e.delIndex, k)
@@ -285,39 +284,15 @@ const (
 	// abbreviation would be a net loss at every position and "zhg" would
 	// stop finding 中国 at all.
 	//
-	// # Why 6.5 and not 5.0
-	//
-	// 5.0 did not deliver what the paragraph above claims. Abbreviating the
-	// last word of a phrase — "lihail" for 厉害了, "meiguor" for 美国人 — earns
-	// coverBonus − abbrevPenalty − syllablePenalty = +1.8, which loses to any
-	// frequency gap over 6×, and 厉害 is 17× commoner than 厉害了 in the corpus.
-	// So the engine answered 厉害 and left the "l" hanging: it declined to
-	// explain a letter the user had deliberately typed.
-	//
-	// This is the ONLY constant that can be moved to fix that. The score is
-	// coverBonus×bytes − penalties + lnP, so between two candidates covering
-	// the SAME input the coverage term cancels exactly — which is where all the
+	// This is the ONLY constant that can move the "explain every letter"
+	// comparison, because between two candidates covering the SAME input
+	// the coverage term cancels exactly. That cancellation is where all the
 	// delicate balances live (English against Chinese, a corrected reading
-	// against a typed one, 山 against 上). Raising it therefore cannot disturb
-	// any of them; it moves only the comparison it is meant to move.
-	//
-	// The value is measured, not chosen. tools/qime-audit -mode coverage ranks
-	// every case by how far the full-coverage reading trails, and the character
-	// of the list changes with the distance:
-	//
-	//	trails by <1.5   选择权 默认值 上海人 中国式 生活上 侵犯了   — extensions, all wanted
-	//	trails by 1.5–2   组织法 个人版 比较快 … but also 监察室 over 检查
-	//	trails by >2      交友 over 教育, 几束花 over 技术, 我门派 over 我们
-	//
-	// The junk past 2.0 is not extension at all, it is RE-SEGMENTATION: a
-	// different cut of the same letters that happens to reach the end. 6.5
-	// (+1.5) takes the clean band and stops before the mixed one.
-	//
-	// Cost, measured on the shipped lexicon: of 35 everyday inputs the top
-	// candidate changed for exactly two — lihail and meiguor, the cases this is
-	// for. Typing two full sentences letter by letter, 48 intermediate states,
-	// nothing changed at all. Typo correction is untouched (0/2880 harm, and
-	// in-syllable recovery ticks up from 94.8% to 95.3%).
+	// against a typed one, 山 against 上), so changing this one leaves them
+	// untouched. It is also why the value is what it is: 5.0 lost to any
+	// frequency gap over ~6× (lihail → 厉害, leaving the "l" unexplained),
+	// while raising it too far starts promoting re-segmentations of the
+	// input rather than extensions of the word.
 	coverBonus = 6.5
 
 	// abbrevPenalty is charged when a syllable was given only as its onset —
@@ -355,24 +330,16 @@ const (
 	// typoPenalty is charged when a syllable was only found after swapping two
 	// adjacent letters.
 	//
-	// Nearly inert, and that is worth saying plainly rather than dressing the
-	// number up. What protects correctly typed input is not this penalty but
-	// the guard in buildLattice: a chunk that already spells a syllable gets no
-	// transposed arc at all, so for correct input there is usually nothing here
-	// to compete. Measured over the 2880 commonest readings in the shipped
-	// lexicon, turning correction on changes the top candidate for ZERO of
-	// them — at every value from 2.0 to 6.0. Recovery of the same 2880 with one
-	// transposition each moves just as little: 98.8% at 2.0, 98.6% at 6.0.
-	//
-	// So the constant is chosen for the cases the audit does not cover. Since a
-	// transposed arc spans exactly the same input as an ordinary one, the
-	// coverage term cancels and this is weighed directly against a difference
-	// in ln P(word) — the same cancellation that lets englishBase be a single
-	// number. 6.0 puts it clear of the band where the lexicon's own weights are
-	// meaningless (18% of common readings have their top two candidates within
-	// 2.0 of each other, an artefact of the upstream corpus — see the README),
-	// so a correction cannot win a coin toss against something actually typed.
-	// 8.0 was measurably worse at the job: recovery drops to 97.4%.
+	// Nearly inert, and that is intentional. What protects correctly typed
+	// input is not this penalty but the guard in buildLattice: a chunk that
+	// already spells a syllable gets no transposed arc at all, so for correct
+	// input there is usually nothing here to compete. The value is chosen for
+	// the cases the guard cannot cover: since a transposed arc spans exactly
+	// the same input as an ordinary one, the coverage term cancels and this is
+	// weighed directly against a difference in ln P(word) — the same
+	// cancellation that lets englishBase be a single number. 6.0 puts it clear
+	// of the band where the lexicon's own weights are meaningless, so a
+	// correction cannot win a coin toss against something actually typed.
 	typoPenalty = 6.0
 
 	// completionPenalty applies to words that run PAST the input ("ni" →
@@ -399,13 +366,12 @@ const (
 	//
 	// That is why a single constant is enough, and why it does not need to
 	// know how long the input is. A clean Chinese reading lands around −2 to
-	// −6 on the right-hand side: 很 for "hen" is one syllable, no penalties, a
-	// common word. A force-fitted one lands near −13: 合理 for "hello" needs
-	// two abbreviated syllables and is not a common word. Sitting between
-	// them, this rule reads as "English wins exactly when Chinese had to be
-	// forced", which is the distinction a user actually makes — and the reason
-	// "hen", "ban", "song" and "men" still put the Chinese first even though
-	// all four are English words.
+	// −6 (很 for "hen": one syllable, no penalties, a common word). A
+	// force-fitted one lands near −13 (合理 for "hello" needs two abbreviated
+	// syllables and is not a common word). Sitting between them, this rule
+	// reads as "English wins exactly when Chinese had to be forced" — and is
+	// why "hen", "ban", "song" and "men" still put the Chinese first even
+	// though all four are English words.
 	englishBase = -8.0
 
 	// englishAltPenalty separates the words sharing one code, so "hell" stays
@@ -584,34 +550,23 @@ func (e *Engine) Candidates(raw string, limit int) []Candidate {
 //
 // # The search walks the trie from the committed reading's node
 //
-// The first implementation re-ranked the ENTIRE combined reading: it built
-// "chi'fan'" + input as a string, ran the full Candidates query on it, and
-// filtered the 96 results down to the ones that were actually continuations —
-// re-parsing on every keystroke syllables that were already committed and could
-// not be read any other way. That cost 600µs–1ms per call against 66µs for an
-// ordinary query, and the session pays it up to twice per keystroke; the README
-// carried it as a known cost for exactly as long as it took to remove.
-//
 // Descending to the committed reading's node FIRST and searching only the new
 // input from there makes the committed boundaries binding for free (there is no
 // other path through the trie), spends the whole budget on real continuations
-// instead of on 先 现 显 线 readings the filter would discard, and drops the
-// call under 40µs. What it deliberately no longer offers is a STITCHED suffix —
-// a continuation assembled by the sentence composer rather than found as a
-// lexicon phrase. A stitched sentence is a guess about segmentation; the whole
-// point of this path is to surface phrases the lexicon actually contains, and
-// the ordinary composition of the remaining buffer still handles the rest.
+// instead of on readings a filter would discard, and keeps the call cheap.
+// What it deliberately does not offer is a STITCHED suffix — a continuation
+// assembled by the sentence composer rather than found as a lexicon phrase. A
+// stitched sentence is a guess about segmentation; the whole point of this path
+// is to surface phrases the lexicon actually contains, and the ordinary
+// composition of the remaining buffer still handles the rest.
 //
 // # Scoring
 //
 // A continuation scores the phrase's score MINUS what the already-committed word
 // scored on its own — the marginal, which is what the suffix actually
-// contributed. That subtraction is the whole reason these can be ranked at all,
-// and it replaces a constant that only ever looked right for one input length:
-// on the old fixed 3.0 scale, 博物 + `guan` offered 馆 at 3.0 against homophones
-// of `guan` scoring 21 to 24, so the continuation carried no ranking weight
-// whatsoever and 关 stayed first. The marginal puts 馆 at 26.9 and first, which
-// is what typing `bowuguan` in one breath has always given.
+// contributed. That subtraction is what lets these rank against ordinary
+// candidates at all, and it replaces a constant that only ever looked right for
+// one input length.
 //
 // It also needs no calibration, because the coverage term cancels exactly as it
 // does for englishBase:
@@ -619,12 +574,9 @@ func (e *Engine) Candidates(raw string, limit int) []Candidate {
 //	marginal = coverBonus·len(input) − (penalties the suffix added)
 //	                                 + ln P(phrase) − ln P(committed word)
 //
-// The last line is the transition probability, straight out of the lexicon. And
-// the cancellation is why the single-letter case did not need protecting after
-// all: 八达 + `l` reaches 岭 through an abbreviated syllable, so the phrase is
-// already docked abbrevPenalty and the marginal lands at 3.9 — behind 来 (4.7),
-// exactly where a one-letter guess belongs. The same formula that promotes a
-// fully spelled continuation to first keeps a guessed one modest.
+// The last line is the transition probability, straight out of the lexicon. The
+// same formula that promotes a fully spelled continuation to first keeps a
+// guessed one (a single-letter abbreviation) modest.
 //
 // ln P(committed word) falls back to 0 when the lexicon has no entry at this
 // reading — the ceiling of a log-probability, so the baseline over-estimates
@@ -846,16 +798,11 @@ func (e *Engine) lexiconWeight(word string, reading []string) (uint32, bool) {
 // truncateKeepingEnglish cuts the list to limit without throwing away an exact
 // English match.
 //
-// Short inputs have far more than `limit` Chinese candidates ranked above the
-// English one — "ssh" scores 7.0, and every plausible reading of s+sh beats
-// that — so a plain cut loses precisely the words a user is most likely to
-// want in English. Measured against the shipped list: of the 927 English codes
-// of three letters or fewer, 15 fell off the end of a 60-candidate list, among
-// them js, ssh, zsh, cd, my, she and bus.
-//
-// This is a lower-level version of the same promise reserveEnglishSlot makes in
-// the UI, and it has to exist here too: that function can only move a
-// candidate the engine actually returned.
+// Short inputs can have far more than `limit` Chinese candidates ranked above
+// the English one, so a plain cut would lose precisely the words a user is most
+// likely to want in English. This is a lower-level version of the same promise
+// reserveEnglishSlot makes in the UI, and it has to exist here too: that
+// function can only move a candidate the engine actually returned.
 //
 // The slot given up is the LAST one, which is the least valuable place in the
 // list — nothing there is reachable without paging to the very end — and never
@@ -1007,23 +954,20 @@ func (e *Engine) harvest(acc *accumulator, input string, r reach, src Source) {
 // is speculation, and speculation that costs latency is not worth having.
 //
 // WHICH dozen is decided by each child's best posting weight, not by syllable
-// order. Children are stored sorted by syllable ID — alphabetically — and the
-// first version expanded the first twelve of those, so whether a continuation
-// could be offered at all depended on where its next syllable happened to
-// sort: the predictions for "ni" were 你啊 and 你把 while 你们 and 你好 never
-// appeared, and 不错 was unreachable from `b` (measured at sixty results —
-// the gap the user-bigram namespace was built to route around). Ranking the
-// scan costs two mmap reads per child and no allocation, and it spends the
-// twelve slots on the continuations a user might actually mean.
+// order. Children are stored sorted by syllable ID — alphabetically — so
+// expanding the first twelve would make whether a continuation is offered at
+// all depend on where its next syllable happens to sort: the predictions for
+// "ni" would be 你啊 and 你把 while 你们 and 你好 never appear, and 不错 would
+// be unreachable from `b`. Ranking the scan costs two mmap reads per child and
+// no allocation, and it spends the twelve slots on the continuations a user
+// might actually mean.
 //
 // bestSpelled is the ceiling: no unboosted prediction may score at or above
 // the best candidate that reads the whole input. completionPenalty makes the
 // same promise — "these must never outrank something the user actually
 // spelled" — but a constant cannot keep it against the corpus's worst weight
-// skew: 版权 rides "版权所有" boilerplate to a weight ~150x that of 半, which
-// beats the 5.0 penalty, so typing "ban" answered 版权 the moment the ranked
-// scan started surfacing the heaviest child instead of the alphabetically
-// lucky ones. The cap enforces the promise structurally; a USER-boosted
+// skew (版权 rides "版权所有" boilerplate to a weight far above 半, beating the
+// 5.0 penalty). The cap enforces the promise structurally; a USER-boosted
 // prediction is exempt because the boost is the documented exception (真 +
 // `b` → 不错 first, once the user has typed that pair — see the succ lookup
 // below and bigramBase).
@@ -1173,43 +1117,23 @@ func (e *Engine) englishExact(input string, acc *accumulator) {
 	// recorded and then never consulted, which reads to the user as an input
 	// method that does not learn.
 	//
-	// Entries whose spelling EQUALS the letters typed are offered too, and that
-	// took a measurement to settle.
-	//
-	// They used to be skipped, on the reasoning that "the letters themselves are
-	// already reachable — Enter commits them, and they are the fallback when
-	// nothing matches". Both halves are false whenever a Chinese reading covers
-	// the whole input, which for a long run of letters is almost always: Enter
-	// confirms that reading instead, and the empty-list fallback never fires
-	// because the list is not empty. `bigquery` reads as bi'g'qu'er'y and offers
-	// 比过去而言 — so a user who had committed the word FOUR times was still
-	// offered nothing, which reads as an input method that does not learn.
-	//
-	// The worry was the pinyin collisions, and the scoring already handles them,
-	// because coverBonus·length against englishBase is exactly the comparison
-	// englishBase was calibrated for. Measured over the 158 identical literals in
-	// a real history — 110 take first place, 48 stay behind Chinese, none return
-	// an empty list — and the split falls where it should:
-	//
-	//	first:  git, url, msg, dev, org, raw, mock, log, api, bigquery (44.0
-	//	        against 比过去而言's 34.2) — none of them plausible pinyin
-	//	behind: hao (好 25.6, hao 11.5), guan (馆 28.0, guan 18.0), bada, go,
-	//	        the, pr, l (-1.5, off the list), b, c, dd, gt, kt — every one
-	//	        of them pinyin-shaped, plus gst, which the user gave two
-	//	        meanings themselves and which now resolves to 告诉他
+	// Entries whose spelling EQUALS the letters typed are offered too. Skipping
+	// them would be wrong whenever a Chinese reading covers the whole input,
+	// which for a long run of letters is almost always: Enter confirms that
+	// reading instead, and the empty-list fallback never fires because the list
+	// is not empty, so the literal would be unreachable. The pinyin collisions
+	// are handled by the same comparison englishBase was calibrated for
+	// (coverBonus·length against englishBase): implausible pinyin wins, and a
+	// pinyin-shaped literal stays behind the Chinese reading.
 	for _, l := range e.user.LiteralsFor(input) {
 		score := base + englishBase
 		// The boost is a claim about SPELLING — "when you type these letters you
 		// mean it written this way" — so it applies only where the spelling
 		// differs from the letters. An identical literal makes no such claim; it
 		// records that the user once bailed out on these letters, which says
-		// nothing about what they mean next time.
-		//
-		// Withholding it is what keeps this safe, and the margin is thin enough
-		// to be worth writing down. `nihao` recorded as a literal scores 24.5
-		// against 你好's 30.49 with the boost withheld, and 30.5 — a coin toss —
-		// with it. Meanwhile `bigquery` wins at 44 against 34.2 either way, so
-		// the case this exists for never needed the boost at all.
+		// nothing about what they mean next time. Withholding it keeps a
+		// pinyin-shaped literal from becoming a coin toss against the word the
+		// letters actually spell.
 		if l.Word != input {
 			score += l.Boost
 		}
@@ -1225,10 +1149,9 @@ func (e *Engine) englishExact(input string, acc *accumulator) {
 
 // maxEmojiDecorations bounds how many emoji one query may add.
 //
-// Two, because the panel reserves ONE slot for emoji and the second exists only
-// so that a user who pages past the first is not looking at a list that quietly
-// stopped having any. Scanning further would cost lookups on a keystroke path
-// for candidates nobody reads.
+// Two: enough that a user who pages past the first still sees the feature, few
+// enough that a page is not filled with pictures. Scanning further would cost
+// lookups on a keystroke path for candidates nobody reads.
 const maxEmojiDecorations = 2
 
 // emojiSourceDepth is how far down the ranked list a word may be and still lend
@@ -1265,10 +1188,9 @@ const emojiSourceDepth = 8
 // on the first page, its picture has no business being there ahead of it — and
 // if it is, the place a user will look for the picture is beside it.
 //
-// This is affordable because it is rare. Measured over the 3000 commonest
-// readings in the shipped lexicon, only 1.7% produce an emoji at all — the map
-// is 4854 hand-picked words, not a layer over the language — so "a slot per
-// page" is a cost paid by one query in sixty, not by every one.
+// This is affordable because it is rare: the map is 4854 hand-picked words,
+// not a layer over the language, so most queries produce no emoji at all and
+// the extra candidate costs nothing where it does not appear.
 func (e *Engine) decorateWithEmoji(input string, out []Candidate) []Candidate {
 	if e.emoji == nil || !e.inlineEmoji || len(out) == 0 {
 		return out
@@ -1481,12 +1403,10 @@ const (
 // learnedPhrases offers multi-syllable words this user built out of several
 // commits — the words the lexicon does not contain.
 //
-// Ranking cannot reach these, and that is the whole point: 业务侧 is not a
-// dictionary word, so before this it could only ever arrive by stitching (which
-// yields exactly ONE candidate, and 测 beats 侧 for `ce` by 0.37), and picking it
-// taught the history something the history could never read back. This is the
-// same wall the literal namespace was built to get past for English brands, and
-// the same fix: an index that PRODUCES rather than only ranks.
+// Ranking cannot reach these: 业务侧 is not a dictionary word, so the only way
+// to produce it is an index that PRODUCES rather than only ranks. This is the
+// same wall the literal namespace addresses for English brands, and the same
+// fix.
 //
 // Scored with the same constants as everything else, exactly as
 // contextCandidates is, so a built word competes on the same terms: what it
@@ -1707,11 +1627,10 @@ func (e *Engine) EnglishWords(typed string, limit int) []Candidate {
 
 		// Bounded insertion over the WHOLE prefix range, rather than
 		// collecting a capped slice and sorting it. Capping the collection
-		// was the obvious version and it was wrong: the table is
-		// alphabetical, so "sh" filled its budget on "sha…" and never
-		// reached "she" — the one completion that mattered. Scanning it all
-		// is affordable because the largest two-letter prefix in the shipped
-		// table holds 966 codes.
+		// would be wrong: the table is alphabetical, so "sh" would fill its
+		// budget on "sha…" and never reach "she". Scanning it all is
+		// affordable because the largest two-letter prefix in the table holds
+		// under a thousand codes.
 		if e.english != nil {
 			var best []string
 			e.english.PrefixWords(code, func(word string) bool {
@@ -1758,48 +1677,29 @@ func shorterFirst(a, b string) bool {
 // input, which is the condition for it to receive a user-dictionary boost.
 //
 // A boost is evidence of the form "for the reading R, this user wants the word
-// W". It is not evidence that they want W right now, and the difference showed
-// up as 是 beating 深圳 for "sz":
+// W". It is not evidence that they want W right now: a candidate reached from a
+// bare onset and then abandoning the rest of the input would be leaning on
+// history gathered when it explained all of it. Hence all-or-nothing.
 //
-//	是    shi        cover=1/2  score=12.03   boost 8.05, picked 11 times
-//	深圳  shen'zhen  cover=2/2  score=11.66   boost 6.46, picked 2 times
+// # Why all-or-nothing rather than a discount
 //
-// The boost on 是 was earned by typing the whole syllable "shi". Here the
-// engine reached that reading from a bare "s", then abandoned the "z" — so it
-// explained half the input using history gathered when it explained all of it.
-//
-// # Why this is all-or-nothing rather than a discount
-//
-// Scaling the boost by coverage is the obvious fix and it does not work, for a
-// reason that is structural rather than a matter of tuning. On
+// Scaling the boost by coverage does not work, for a structural reason. On
 // all-abbreviation input each additional explained byte is worth
-// coverBonus − abbrevPenalty − syllablePenalty = 1.8, less whatever frequency
-// advantage the shorter word has — about 1.2 in the case above. A boost is
+// coverBonus − abbrevPenalty − syllablePenalty, a small bounded margin, less
+// whatever frequency advantage the shorter word has. A boost is
 // userBase + userScale·ln(picks+1) + recency, which GROWS WITHOUT BOUND in how
 // often a word was picked. So for any fixed discount factor there is a pick
-// count that overcomes the margin, and the bug returns for whoever types that
-// word most.
-//
-// Measured against this user's own 135 learned words, that is not theoretical:
-//
-//	                sz      ban    nin
-//	no discount     是 ✗    吧 ✗   你 ✗
-//	× coverage      深圳 ✓   吧 ✗   你 ✗
-//	× coverage²     深圳 ✓   半 ✓   您 ✓      ... but only because they had
-//	                                          also picked 深圳 twice; with 是
-//	                                          alone learned it is 是 again
-//	full coverage   深圳 ✓   半 ✓   您 ✓
-//	only
+// count that overcomes the margin, and the problem returns for whoever types
+// that word most.
 //
 // # What this costs
 //
-// A learned word stops being boosted the moment one stray letter is typed
-// past it: with "nihaoo", 拟好 covers 5 of 6 bytes and loses its boost. That
-// is a real cost, and it is bounded — the learned word only loses its lead if
-// it was the underdog on frequency, which is exactly the case the boost exists
-// for. The alternative is a rule that quietly stops working for the user's
-// most-typed words, which is worse: it fails for the people who use the input
-// method most, and it fails silently.
+// A learned word stops being boosted the moment one stray letter is typed past
+// it. That is a real cost, and it is bounded — the learned word only loses its
+// lead if it was the underdog on frequency, which is exactly the case the boost
+// exists for. The alternative is a rule that quietly stops working for the
+// user's most-typed words, which is worse: it fails for the people who use the
+// input method most, and it fails silently.
 func explainsEverything(consumed, total int) bool { return consumed >= total }
 
 // readingOf spells a reach's syllables, memoized on the trie node it ended
