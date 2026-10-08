@@ -15,6 +15,21 @@
 #
 #   IDENTITY="Developer ID Application: Your Name (TEAMID)" ./build.sh install
 #
+# One place ad-hoc is NOT enough: while any process holds Secure Event Input
+# (a focused password field, or an app that leaks it), the OS refuses to
+# select an ad-hoc-signed input method. It greys out in the input menu,
+# TISSelectInputSource returns noErr but changes nothing, and the server
+# only sees Activate/Deactivate pairs a millisecond apart. A Developer ID
+# signed input method (Sogou) stays selectable in the same session. That
+# the signature is the deciding difference is inferred, not yet confirmed
+# with a Developer ID build of this bundle. Find the holder with:
+#
+#   ioreg -l -w 0 | grep -o '"kCGSSessionSecureInputPID"=[0-9]*'
+#
+# The PID can belong to a process that has already exited: an app that dies
+# holding Secure Event Input can leave it stuck on. Restarting apps does not
+# clear that; locking and unlocking the screen does (observed).
+#
 # Deliberately a hand-built bundle rather than an Xcode project: the point is
 # to see exactly which Info.plist keys and which signing steps are
 # load-bearing. The binary is Go (cgo); the IMK shim is bridge_darwin.m inside
@@ -128,7 +143,8 @@ do_build() {
         go build -o "$APP/Contents/MacOS/$APP_NAME" . )
 
     # Apple Silicon refuses to execute an unsigned binary at all. Ad-hoc
-    # is enough for both execution and input-method registration (verified);
+    # is enough for both execution and input-method registration (verified),
+    # but not for staying selectable under Secure Event Input (see the header);
     # distribution needs Developer ID + notarization.
     if [ "$IDENTITY" = "-" ]; then
         codesign --force --sign - "$APP" >/dev/null

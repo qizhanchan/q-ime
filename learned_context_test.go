@@ -580,6 +580,86 @@ func TestSingleCharacterContextSuffixIsVisible(t *testing.T) {
 	}
 }
 
+// TestAParticleFollowsItsWord is the cold-start case the lexicon's phrase
+// weights get wrong: 删除了 is an entry, but at the floor weight of an n-gram
+// list, so read as a transition probability it said 了 almost never follows 删除
+// and the bare-letter favourite 来 took first.
+func TestAParticleFollowsItsWord(t *testing.T) {
+	cases := []struct {
+		word    string
+		reading []string
+		typed   string
+		want    string
+	}{
+		{"删除", []string{"shan", "chu"}, "l", "了"},
+		{"修改", []string{"xiu", "gai"}, "l", "了"},
+		{"完成", []string{"wan", "cheng"}, "l", "了"},
+		{"去", []string{"qu"}, "g", "过"},
+		{"看", []string{"kan"}, "z", "着"},
+		{"慢慢", []string{"man", "man"}, "d", "地"},
+		{"跑", []string{"pao"}, "de", "得"},
+		{"好", []string{"hao"}, "b", "吧"},
+		{"走", []string{"zou"}, "b", "吧"},
+		{"好", []string{"hao"}, "n", "呢"},
+	}
+	for _, c := range cases {
+		s, _ := newLearningSession(t)
+		commitWord(s, c.word, c.reading...)
+		s.reset(noClient)
+		typeKeys(s, c.typed)
+		if len(s.cands) == 0 || s.cands[0].Word != c.want {
+			t.Errorf("after %s, %q gives %v, want %s first",
+				c.word, c.typed, candWords(s.cands[:min(6, len(s.cands))]), c.want)
+		}
+	}
+}
+
+// TestTheParticleCreditSurvivesHistory is the same case for a user who has
+// already typed both pairs: 删除→来 as often as 删除→了, and 来 for `l` more
+// often overall. The pair memory is a tie and the lexicon's 删除了 is what should
+// break it — which it did not while the credit was computed without the pair.
+func TestTheParticleCreditSurvivesHistory(t *testing.T) {
+	s, _ := newLearningSession(t)
+	for i := 0; i < 3; i++ {
+		commitWord(s, "删除", "shan", "chu")
+		commitWord(s, "来", "lai")
+		s.endSentence()
+		commitWord(s, "删除", "shan", "chu")
+		commitWord(s, "了", "le")
+		s.endSentence()
+		commitWord(s, "来", "lai")
+		s.endSentence()
+	}
+	commitWord(s, "删除", "shan", "chu")
+	s.reset(noClient)
+	typeKeys(s, "l")
+	if len(s.cands) == 0 || s.cands[0].Word != "了" {
+		t.Errorf("after 删除, \"l\" gives %v, want 了 first", candWords(s.cands[:min(6, len(s.cands))]))
+	}
+}
+
+// TestAPronounIsNotReadAsAPredicate is the other half: 我了 and 我们了 are
+// lexicon entries too, and the particle credit must not turn 我 + `l` into 我了.
+func TestAPronounIsNotReadAsAPredicate(t *testing.T) {
+	for _, c := range []struct {
+		word    string
+		reading []string
+	}{
+		{"我", []string{"wo"}},
+		{"他", []string{"ta"}},
+		{"我们", []string{"wo", "men"}},
+	} {
+		s, _ := newLearningSession(t)
+		commitWord(s, c.word, c.reading...)
+		s.reset(noClient)
+		typeKeys(s, "l")
+		if len(s.cands) == 0 || s.cands[0].Word != "来" {
+			t.Errorf("after %s, \"l\" gives %v, want 来 first",
+				c.word, candWords(s.cands[:min(6, len(s.cands))]))
+		}
+	}
+}
+
 // TestOneMoreLetterDropsAContinuationThatWasWrong is the escape hatch, and the
 // reason a remembered continuation is allowed near the top at all: it costs one
 // keystroke to be rid of, and no gesture anyone has to learn.

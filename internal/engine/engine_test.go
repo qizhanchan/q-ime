@@ -138,6 +138,32 @@ func TestContinuationsStripTheCommittedPrefix(t *testing.T) {
 	}
 }
 
+// TestContinuationsCarryTheLearnedPair pins the key the pair memory is read
+// with. Picking a continuation commits only its suffix, so that is what the
+// session records after the last word; looking the pair up under the whole
+// phrase found nothing, and a continuation the user had picked ranked exactly as
+// one they never had.
+func TestContinuationsCarryTheLearnedPair(t *testing.T) {
+	u := NewUserDict(filepath.Join(t.TempDir(), "user.json"))
+	e := New(buildTestDict(t), u, pinyin.Fuzzy{})
+	score := func() float64 {
+		t.Helper()
+		e.SetContext("你")
+		cs := e.Continuations("你", []string{"ni"}, "m", 10)
+		i := indexOf(cs, "们")
+		if i < 0 {
+			t.Fatalf("after 你, `m` gives %v, want suffix 们", words(cs))
+		}
+		return cs[i].Score
+	}
+	before := score()
+	u.RecordBigram("你", []string{"men"}, "们")
+	if after := score(); after <= before {
+		t.Errorf("们 after 你 scores %.2f with the pair recorded, %.2f without; want it higher",
+			after, before)
+	}
+}
+
 // words extracts just the candidate text, for readable assertions.
 func words(cs []Candidate) []string {
 	out := make([]string, len(cs))

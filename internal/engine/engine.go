@@ -620,6 +620,9 @@ func (e *Engine) Continuations(prevWord string, prevReading []string, input stri
 	roots := e.collect(lat, 0, maxSyls, &budget, n)
 
 	var out []Candidate
+	// particle holds, per particle suffix, the score it earns from the
+	// attestation credit — see particles.
+	var particle map[string]float64
 	add := func(node dict.Node, r reach, extra int, fullSyls []uint16) {
 		cnt := e.dict.PostCount(node)
 		if cnt > maxPostsPerNode {
@@ -642,6 +645,7 @@ func (e *Engine) Continuations(prevWord string, prevReading []string, input stri
 			if len(p.Word) <= len(prevWord) || !strings.HasPrefix(p.Word, prevWord) {
 				continue
 			}
+			suffix := p.Word[len(prevWord):]
 			score := base + e.logProb(p.Weight) - baseline
 			// The phrase keeps its own boosts — picking 博物馆 still helps —
 			// while the baseline stays lexicon-only, so picking 博物 alone
@@ -650,8 +654,42 @@ func (e *Engine) Continuations(prevWord string, prevReading []string, input stri
 				if b, ok := e.user.Boost(reading, p.Word); ok {
 					score += b
 				}
-				if b, ok := e.succ[p.Word]; ok {
+				// The pair memory is keyed by what was PICKED after the last
+				// word, and picking a continuation commits only its suffix:
+				// 吃饭 then 了吗 records 吃饭→了吗, never 吃饭→吃饭了吗.
+				if b, ok := e.succ[suffix]; ok {
 					score += b
+				}
+			}
+			if extra == 0 && r.end >= len(cleanInput) &&
+				len(r.syls) == 1 && particles[suffix] {
+				// The better of two estimates, and both are needed: 删除了 has a
+				// floor-weight phrase and a fine unigram, 好呢 a strong phrase and
+				// a unigram (40k for 呢, against 2.25M for 那) too weak to clear
+				// 那 even with the credit.
+				alt := score
+				if w, ok := e.lexiconWeight(suffix, reading[len(prevReading):]); ok {
+					alone := coverBonus*float64(r.end) - r.penalty() + e.logProb(w)
+					if b, ok := e.user.Boost(reading[len(prevReading):], suffix); ok {
+						alone += b
+					}
+					// What the user has typed after the last word too, exactly
+					// as the particle's ordinary candidate carries it. Without
+					// this the credit only ever counted for a user with no
+					// history of the pair: once 删除→了 had been typed, the
+					// ordinary 了 (unigram + pair) outscored this one and the
+					// lexicon's attestation silently stopped contributing.
+					if b, ok := e.succ[suffix]; ok {
+						alone += b
+					}
+					alt = math.Max(alt, alone)
+				}
+				alt += bigramBase
+				if particle == nil {
+					particle = make(map[string]float64, 2)
+				}
+				if old, ok := particle[suffix]; !ok || alt > old {
+					particle[suffix] = alt
 				}
 			}
 			out = append(out, Candidate{
@@ -737,7 +775,46 @@ func (e *Engine) Continuations(prevWord string, prevReading []string, input stri
 			break
 		}
 	}
+	// Only the BEST continuation may be a particle's claim to rank as
+	// one. 我了 and 我们了 are lexicon entries too, but for 我 + `l` the lexicon
+	// itself prefers 我来, and that preference is what keeps a pronoun from
+	// being read as a predicate.
+	if len(kept) > 0 {
+		if alt, ok := particle[kept[0].Word]; ok && alt > kept[0].Score {
+			kept[0].Score = alt
+		}
+	}
 	return kept
+}
+
+// particles are the function words that attach to what comes before them and
+// never start anything: the dynamic particles 了着过 (动态助词), the structural
+// 的得地 (结构助词) and the sentence-final 吗呢吧 (语气助词).
+//
+// Whether a word takes one is a property of that word, and the lexicon records
+// it as an entry — 删除了, 慢慢地, 跑得, 好吧. What it does not record is how OFTEN:
+// the entry's weight is the phrase's own count, and 删除了 sits at the floor
+// weight of an n-gram list (5600, against 4M for 删除). Read as a transition
+// probability that weight says 了 almost never follows 删除, when what the
+// entry actually attests is that 删除 is a verb and 了 is exactly what follows
+// verbs. The one-buffer path gets this right (`shanchul` → 删除了, never 删除来,
+// because composing 删除|来 pays the junction); after 删除 is committed the
+// junction is gone and the bare-letter ranking — 来 four times 了's unigram
+// weight — took over.
+//
+// So an attested particle is scored as the particle on its own or as the
+// phrase's marginal, whichever is higher, plus bigramBase: the lexicon entry
+// counts as one recorded pair, at the base with no frequency or recency term,
+// which is weaker than any pair the user typed.
+//
+// Several of these characters are also ordinary words — 地 in 天地, 得 in 获得,
+// 吧 in 酒吧. The credit does not tell them apart, and does not need to: it only
+// goes to the lexicon's best continuation of the committed word, and 天 + `d`
+// reaching 天地 is a fine reason to offer 地 whatever its part of speech.
+var particles = map[string]bool{
+	"了": true, "着": true, "过": true,
+	"的": true, "得": true, "地": true,
+	"吗": true, "呢": true, "吧": true,
 }
 
 // MayContinue reports whether the lexicon holds any phrase whose reading starts
